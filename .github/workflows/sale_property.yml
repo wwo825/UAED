@@ -206,6 +206,9 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect_merge_batches.outputs.matrix) }}
 
+    env:
+      PYTHONUNBUFFERED:
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
