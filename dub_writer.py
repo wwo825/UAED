@@ -219,94 +219,48 @@ def enrich_with_description(
     df: pd.DataFrame,
     url_column: str = "absolute_url",
     headless: bool = True,
-    min_delay: float = 3,  
-    max_delay: float = 7,   
-    max_pages_per_browser: int = 50,
+    min_delay: float = 5,
+    max_delay: float = 12,
 ) -> pd.DataFrame:
     df = df.copy()
     description_col = [None] * len(df)
-    total = len(df)
-
-    urls_to_process = []
-    for pos, (idx, row) in enumerate(df.iterrows()):
-        url = _get_english_url(row.get(url_column))
-        if url:
-            urls_to_process.append((pos, url))
-        else:
-            print(f"  [{pos + 1}/{total}] Skipped - no URL")
-
-    if not urls_to_process:
-        df["description_full"] = description_col
-        return df
-
-    processed_in_current_browser = 0
 
     with Stealth().use_sync(sync_playwright()) as p:
-        browser = None
-        context = None
-        page = None
+        browser = p.chromium.launch(headless=headless, channel="chrome")
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US",
+            timezone_id="Asia/Dubai",
+        )
+        page = context.new_page()
 
-        try:
-            for batch_pos, (pos, url) in enumerate(urls_to_process):
-                if browser is None or processed_in_current_browser >= max_pages_per_browser:
-                    if page:
-                        page.close()
-                    if context:
-                        context.close()
-                    if browser:
-                        browser.close()
+        for pos, (idx, row) in enumerate(df.iterrows()):
+            url = _get_english_url(row.get(url_column))
+            if not url:
+                print(f"  [{pos + 1}/{len(df)}] Skipped - no URL")
+                continue
 
-                    browser = p.chromium.launch(headless=headless, channel="chrome")
-                    context = browser.new_context(
-                        viewport={"width": 1920, "height": 1080},
-                        locale="en-US",
-                        timezone_id="Asia/Dubai",
-                    )
-                    page = context.new_page()
-                    
-                    page.on("dialog", lambda dialog: dialog.dismiss())
-                    
-                    processed_in_current_browser = 0
-                    print(f"  [Browser restart] at position {batch_pos + 1}")
+            print(f"  [{pos + 1}/{len(df)}] Visiting: {url}")
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                page.wait_for_timeout(random.uniform(1500, 3000))
 
-                print(f"  [{batch_pos + 1}/{len(urls_to_process)}] Visiting: {url}")
-                
-                try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=20000)  
-                    page.wait_for_timeout(random.uniform(1000, 2000))
+                html = page.content()
+                if "Pardon Our Interruption" in html:
+                    print("    -> Imperva challenge hit, stopping enrichment.")
+                    break
 
-                    html = page.evaluate("document.documentElement.outerHTML")
-                    if "Pardon Our Interruption" in html:
-                        print("    -> Imperva challenge hit, skipping rest of enrichment.")
-                        break
+                description_col[pos] = clean_for_excel(_extract_description(page))
 
-                    description_col[pos] = clean_for_excel(_extract_description(page))
+            except Exception as e:
+                print(f"    -> FAILED: {e}")
 
-                except Exception as e:
-                    print(f"    -> FAILED: {e}")
+            if pos < len(df) - 1:
+                delay = random.uniform(min_delay, max_delay)
+                time.sleep(delay)
 
-                processed_in_current_browser += 1
-
-                if batch_pos < len(urls_to_process) - 1:
-                    delay = random.uniform(min_delay, max_delay)
-                    time.sleep(delay)
-
-            if page:
-                page.close()
-            if context:
-                context.close()
-            if browser:
-                browser.close()
-
-        except Exception as e:
-            print(f"  [CRITICAL] Browser crashed: {e}")
-            if page:
-                page.close()
-            if context:
-                context.close()
-            if browser:
-                browser.close()
-
+        page.close()
+        browser.close()
     df["description_full"] = description_col
     return df
 
@@ -704,20 +658,7 @@ def process_category(
 
     if enrich_description and "absolute_url" in df.columns:
         print(f"  Enriching {len(df)} rows with description_full...")
-        
-        batch_size = 100
-        enriched_dfs = []
-        
-        for i in range(0, len(df), batch_size):
-            batch_df = df.iloc[i:i+batch_size].copy()
-            print(f"  Enriching batch {i//batch_size + 1}/{(len(df)-1)//batch_size + 1} ({len(batch_df)} rows)...")
-            batch_df = enrich_with_description(batch_df)
-            enriched_dfs.append(batch_df)
-            
-            import gc
-            gc.collect()
-        
-        df = pd.concat(enriched_dfs, ignore_index=True)
+        df = enrich_with_description(df)
 
     total = len(df)
     excel_files = []

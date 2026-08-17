@@ -232,7 +232,6 @@ jobs:
           path: raw_parts/
 
       - name: Process batch (no R2 upload yet)
-        timeout-minutes: 60
         env:
           CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
           CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
