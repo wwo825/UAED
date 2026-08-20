@@ -219,10 +219,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pandas openpyxl boto3 requests pillow python-dotenv playwright playwright-stealth
-
-      - name: Install Playwright browsers
-        run: playwright install --with-deps chromium
+        run: pip install pandas openpyxl boto3 requests pillow python-dotenv
       
       - name: Download raw data for ${{ matrix.category }}
         uses: actions/download-artifact@v4
