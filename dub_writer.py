@@ -13,8 +13,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from r2_uploader import upload_buffer
 from datetime import datetime, timedelta, timezone
 
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+#from playwright.sync_api import sync_playwright
+#from playwright_stealth import Stealth
 
 WORKFLOW_NAME = os.environ.get("WORKFLOW_NAME", "Unknown")
 
