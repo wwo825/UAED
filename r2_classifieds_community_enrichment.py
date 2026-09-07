@@ -146,7 +146,20 @@ def clean_excel_value(value):
     return value
 
 
-def prepare(date_str: str | None, out_dir: str, category: str = "all"):
+def matches_categories(key: str, category_slugs: list[str]) -> bool:
+    """True if any of the given category slugs appears in the R2 key.
+
+    Matching is case-insensitive and treats '_' and '-' as the same
+    character, since category slugs are sometimes written with hyphens
+    (e.g. "computers-networking") and sometimes with underscores.
+    """
+    if not category_slugs:
+        return True
+    normalized_key = key.lower().replace("_", "-")
+    return any(slug in normalized_key for slug in category_slugs)
+
+
+def prepare(date_str: str | None, out_dir: str, category: str = "all", categories: str = ""):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     jobs_dir = out / "jobs"
@@ -163,6 +176,19 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all"):
         keys.extend(list_keys(client, classifieds_prefix))
     if category in ("all", "community"):
         keys.extend(list_keys(client, community_prefix))
+
+    category_slugs = [c.strip().lower().replace("_", "-") for c in categories.split(",") if c.strip()]
+    if category_slugs:
+        before = len(keys)
+        filtered = [k for k in keys if matches_categories(k, category_slugs)]
+        if not filtered:
+            print(f"[PREPARE][WARN] No files matched categories {category_slugs}.")
+            print("[PREPARE][WARN] Available files were:")
+            for k in keys:
+                print(f"    {k}")
+        keys = filtered
+        print(f"[PREPARE] Category filter: {category_slugs}")
+        print(f"[PREPARE] Files after category filter: {len(keys)} (was {before})")
 
     print(f"[PREPARE] Date: {date_iso}")
     print(f"[PREPARE] Category: {category}")
@@ -218,6 +244,7 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all"):
             "date": date_iso,
             "prefix": prefix,
             "category": category,
+            "category_slugs": category_slugs,
             "jobs": manifest,
             "total_work_items": len(work),
             "total_jobs": len(chunks),
@@ -633,6 +660,11 @@ def main():
         choices=["all", "classified", "community"],
         help="Which section to scan: classified, community, or all (default all)",
     )
+    p.add_argument(
+        "--categories",
+        default="",
+        help="Comma-separated category slugs to filter files by (e.g. 'electronics,gaming'). Empty = no filter.",
+    )
 
     s = sub.add_parser("scrape")
     s.add_argument("--job", required=True)
@@ -645,7 +677,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "prepare":
-        prepare(args.date, args.out, args.category)
+        prepare(args.date, args.out, args.category, args.categories)
     elif args.command == "scrape":
         scrape_job(args.job, args.output)
     elif args.command == "combine":

@@ -1,0 +1,47 @@
+name: Enrichment Orchestrator
+
+on:
+  workflow_run:
+    workflows: ["Classifieds"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Date to enrich (YYYY-MM-DD). Leave empty for yesterday in Asia/Dubai."
+        required: false
+        type: string
+
+jobs:
+  # ---- Classified: 3 groups run one after another ----
+  classified-a:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    uses: ./.github/workflows/enrichment-group.yml
+    with:
+      type: classified
+      group_name: classified-a
+      categories: "electronics,computers-networking,business-industrial,home-appliances,sports-equipment,clothing-accessories,cameras-imaging,jewelry-watches"
+      date: ${{ inputs.date }}
+    secrets: inherit
+
+  classified-b:
+    needs: classified-a
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') }}
+    uses: ./.github/workflows/enrichment-group.yml
+    with:
+      type: classified
+      group_name: classified-b
+      categories: "pets,musical-instruments,gaming,baby-items,toys,tickets-vouchers,collectibles"
+      date: ${{ inputs.date }}
+    secrets: inherit
+
+  classified-c:
+    needs: classified-b
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') }}
+    uses: ./.github/workflows/enrichment-group.yml
+    with:
+      type: classified
+      group_name: classified-c
+      categories: "books,music,free-stuff,lostfound,dvds-movies,mobile-phones-pdas,furniture-home-garden"
+      date: ${{ inputs.date }}
+    secrets: inherit

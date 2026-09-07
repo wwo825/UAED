@@ -1,16 +1,52 @@
-name: Community Enrichment
+name: Enrichment Group
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      type:
+        description: "classified or community"
+        required: true
+        type: string
+      categories:
+        description: "Comma-separated category slugs this group handles"
+        required: true
+        type: string
+      group_name:
+        description: "Short label for this group, used in artifact names (e.g. classified-a)"
+        required: true
+        type: string
       date:
-        description: "Date to enrich (YYYY-MM-DD). Leave empty for yesterday in Asia/Dubai."
+        description: "YYYY-MM-DD; empty = yesterday in Asia/Dubai"
         required: false
         type: string
-  workflow_run:
-    workflows: ["Classifieds Enrichment"]
-    types:
-      - completed
+        default: ""
+    secrets:
+      CF_R2_ACCESS_KEY_ID:
+        required: true
+      CF_R2_SECRET_ACCESS_KEY:
+        required: true
+      CF_R2_ENDPOINT_URL:
+        required: true
+      CF_R2_BUCKET_NAME:
+        required: true
+  workflow_dispatch:
+    inputs:
+      type:
+        description: "classified or community"
+        required: true
+        type: string
+      categories:
+        description: "Comma-separated category slugs this group handles"
+        required: true
+        type: string
+      group_name:
+        description: "Short label for this group, used in artifact names (e.g. classified-a)"
+        required: true
+        type: string
+      date:
+        description: "YYYY-MM-DD; empty = yesterday in Asia/Dubai"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -21,7 +57,6 @@ env:
 
 jobs:
   prepare:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       has_jobs: ${{ steps.matrix.outputs.has_jobs }}
@@ -50,9 +85,9 @@ jobs:
           CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
         run: |
           if [ -n "${{ inputs.date }}" ]; then
-            python r2_classifieds_community_enrichment.py prepare --date "${{ inputs.date }}" --out work --category community
+            python r2_classifieds_community_enrichment.py prepare --date "${{ inputs.date }}" --out work --category "${{ inputs.type }}" --categories "${{ inputs.categories }}"
           else
-            python r2_classifieds_community_enrichment.py prepare --out work --category community
+            python r2_classifieds_community_enrichment.py prepare --out work --category "${{ inputs.type }}" --categories "${{ inputs.categories }}"
           fi
 
       - name: Build matrix with batching
@@ -96,7 +131,7 @@ jobs:
       - name: Upload work manifest and jobs
         uses: actions/upload-artifact@v4
         with:
-          name: community-enrichment-work
+          name: enrichment-work-${{ inputs.group_name }}
           path: work/
           if-no-files-found: error
           retention-days: 2
@@ -132,7 +167,7 @@ jobs:
       - name: Download prepared jobs
         uses: actions/download-artifact@v4
         with:
-          name: community-enrichment-work
+          name: enrichment-work-${{ inputs.group_name }}
           path: work
 
       - name: Scrape batch ${{ matrix.batch.batch_id }}
@@ -178,7 +213,7 @@ jobs:
       - name: Upload scrape results
         uses: actions/upload-artifact@v4
         with:
-          name: community-enrichment-result-batch-${{ matrix.batch.batch_id }}
+          name: enrichment-result-${{ inputs.group_name }}-batch-${{ matrix.batch.batch_id }}
           path: work/results/job_*.json
           if-no-files-found: warn
           retention-days: 2
@@ -208,13 +243,13 @@ jobs:
       - name: Download prepared work
         uses: actions/download-artifact@v4
         with:
-          name: community-enrichment-work
+          name: enrichment-work-${{ inputs.group_name }}
           path: work
 
       - name: Download scrape results
         uses: actions/download-artifact@v4
         with:
-          pattern: community-enrichment-result-batch-*
+          pattern: enrichment-result-${{ inputs.group_name }}-batch-*
           path: work/results
           merge-multiple: true
           if-no-artifact-found: warn
@@ -235,7 +270,7 @@ jobs:
       - name: Upload combine summary
         uses: actions/upload-artifact@v4
         with:
-          name: community-enrichment-summary
+          name: enrichment-summary-${{ inputs.group_name }}
           path: work/combine_summary.json
           if-no-files-found: warn
           retention-days: 7
