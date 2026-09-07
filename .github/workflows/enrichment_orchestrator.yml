@@ -16,7 +16,7 @@ jobs:
   # ---- Classified: 3 groups run one after another ----
   classified-a:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    uses: ./.github/workflows/enrichment-group.yml
+    uses: ./.github/workflows/enrichment_group.yml
     with:
       type: classified
       group_name: classified-a
@@ -27,7 +27,7 @@ jobs:
   classified-b:
     needs: classified-a
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') }}
-    uses: ./.github/workflows/enrichment-group.yml
+    uses: ./.github/workflows/enrichment_group.yml
     with:
       type: classified
       group_name: classified-b
@@ -38,7 +38,7 @@ jobs:
   classified-c:
     needs: classified-b
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') }}
-    uses: ./.github/workflows/enrichment-group.yml
+    uses: ./.github/workflows/enrichment_group.yml
     with:
       type: classified
       group_name: classified-c
