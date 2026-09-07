@@ -137,13 +137,45 @@ def is_empty(value: Any) -> bool:
 
 
 def excel_sheets(data: bytes) -> dict[str, pd.DataFrame]:
-    return pd.read_excel(io.BytesIO(data), sheet_name=None)
+    return pd.read_excel(io.BytesIO(data), sheet_name=None, dtype={PHONE_COLUMN: str})
 
 
 def clean_excel_value(value):
     if isinstance(value, str):
         return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", value)
     return value
+
+
+def read_cached_users(client, users_key: str) -> dict[str, dict]:
+    try:
+        data = download_bytes(client, users_key)
+    except client.exceptions.NoSuchKey:
+        return {}
+    except Exception as exc:
+        print(f"[WARN] Could not read {users_key}: {exc}")
+        return {}
+
+    sheets = excel_sheets(data)
+    if not sheets:
+        return {}
+
+    users = {}
+    for df in sheets.values():
+        if USER_ID_COLUMN not in df.columns and USER_COLUMN in df.columns:
+            df = df.copy()
+            df[USER_ID_COLUMN] = df[USER_COLUMN].apply(user_id_from_value)
+        if USER_ID_COLUMN not in df.columns:
+            continue
+        for _, row in df.iterrows():
+            uid = row.get(USER_ID_COLUMN)
+            if is_empty(uid):
+                continue
+            uid = str(uid)
+            phone = row.get(PHONE_COLUMN)
+            # Cache only users for whom we actually have a phone.
+            if not is_empty(phone):
+                users[uid] = row.to_dict()
+    return users
 
 
 def matches_categories(key: str, category_slugs: list[str]) -> bool:
@@ -194,6 +226,17 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all", categorie
     print(f"[PREPARE] Category: {category}")
     print(f"[PREPARE] Found {len(keys)} Excel file(s).")
 
+    if category == "classified":
+        users_key = f"{classifieds_prefix}users-data/users-data.xlsx"
+    elif category == "community":
+        users_key = f"{community_prefix}users-data/users-data.xlsx"
+    else:
+        users_key = f"{prefix}users-data/users-data.xlsx"
+
+    cached_users = read_cached_users(client, users_key)
+    print(f"[PREPARE] Users cache: {users_key}")
+    print(f"[PREPARE] Cached users with phone: {len(cached_users)}")
+
     work = []
 
     for key in keys:
@@ -209,11 +252,14 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all", categorie
                 listing_id = str(listing_id)
 
                 uid = user_id_from_value(row.get(USER_COLUMN))
+                cached = cached_users.get(uid) if uid else None
+                cached_phone = cached.get(PHONE_COLUMN) if cached else None
 
                 phone_missing = is_empty(row.get(PHONE_COLUMN))
                 description_missing = is_empty(row.get(DESCRIPTION_COLUMN))
 
-                need_phone = phone_missing
+                # If user is already cached with a phone, no phone request is needed.
+                need_phone = phone_missing and not cached
                 need_description = description_missing
 
                 if not need_phone and not need_description:
@@ -227,6 +273,7 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all", categorie
                     "absolute_url": row.get("absolute_url"),
                     USER_COLUMN: row.get(USER_COLUMN),
                     USER_ID_COLUMN: uid,
+                    "cached_phone": cached_phone,
                     "need_phone": bool(need_phone),
                     "need_description": bool(need_description),
                 })
@@ -245,6 +292,7 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all", categorie
             "prefix": prefix,
             "category": category,
             "category_slugs": category_slugs,
+            "users_key": users_key,
             "jobs": manifest,
             "total_work_items": len(work),
             "total_jobs": len(chunks),
@@ -447,9 +495,9 @@ def scrape_job(job_file: str, output_file: str):
                 "id": listing_id,
                 USER_COLUMN: item.get(USER_COLUMN),
                 USER_ID_COLUMN: item.get(USER_ID_COLUMN),
-                "phone": None,
+                "phone": item.get("cached_phone"),
                 "description_full": None,
-                "phone_status": "not_needed" if not item.get("need_phone") else None,
+                "phone_status": "cached" if not item.get("need_phone") else None,
                 "description_status": "not_needed" if not item.get("need_description") else None,
             }
 
@@ -583,10 +631,22 @@ def combine(results_dir: str, date_str: str | None):
         all_results.extend(json.loads(path.read_text(encoding="utf-8")))
 
     updates = {}
+    new_users = {}
 
     for r in all_results:
         key = (r["file_key"], r["sheet_name"], str(r["id"]))
         updates[key] = r
+
+        uid = r.get(USER_ID_COLUMN)
+        phone = r.get("phone")
+        if uid and not is_empty(phone) and r.get("phone_status") in {"ok", "cached"}:
+            new_users[str(uid)] = {
+                USER_COLUMN: r.get(USER_COLUMN),
+                USER_ID_COLUMN: str(uid),
+                LEGACY_ID_COLUMN: legacy_id_from_value(r.get(USER_COLUMN)),
+                PHONE_COLUMN: phone,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
 
     changed_files = 0
 
@@ -634,11 +694,45 @@ def combine(results_dir: str, date_str: str | None):
             changed_files += 1
             print(f"[COMBINE] Uploaded: {key}")
 
+    # Merge users-data with the existing cache. Only successful phone records are appended.
+    users_key = manifest["users_key"]
+    old_users = read_cached_users(client, users_key)
+
+    merged = {}
+    for uid, row in old_users.items():
+        merged[uid] = {
+            USER_COLUMN: row.get(USER_COLUMN),
+            USER_ID_COLUMN: uid,
+            LEGACY_ID_COLUMN: row.get(LEGACY_ID_COLUMN) or legacy_id_from_value(row.get(USER_COLUMN)),
+            PHONE_COLUMN: row.get(PHONE_COLUMN),
+            "updated_at": row.get("updated_at"),
+        }
+
+    for uid, row in new_users.items():
+        # A cached user wins unless the new result is the first successful phone.
+        if uid not in merged or is_empty(merged[uid].get(PHONE_COLUMN)):
+            merged[uid] = row
+
+    users_df = pd.DataFrame(list(merged.values()))
+    if not users_df.empty:
+        users_df = users_df.drop_duplicates(subset=[USER_ID_COLUMN], keep="last")
+
+        upload_bytes(
+            client,
+            users_key,
+            build_excel_bytes({"users": users_df}),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        print(f"[COMBINE] users-data: {len(users_df)} users")
+
     summary = {
         "date": date_iso,
         "result_files": len(result_files),
         "result_rows": len(all_results),
         "changed_listing_files": changed_files,
+        "cached_users_before": len(old_users),
+        "successful_users_in_results": len(new_users),
+        "cached_users_after": len(merged),
     }
     (root / "combine_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
