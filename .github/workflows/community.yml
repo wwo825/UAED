@@ -1,10 +1,6 @@
 name: Community
 
 on:
-  workflow_run:
-    workflows: ["Classifieds"]
-    types:
-      - completed
   workflow_dispatch:
 
 jobs:
