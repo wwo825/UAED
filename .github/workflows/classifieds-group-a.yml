@@ -108,7 +108,7 @@ jobs:
     if: ${{ needs.prepare.outputs.has_jobs == 'true' }}
     strategy:
       fail-fast: false
-      max-parallel: 3  # تشغيل 3 Batches في نفس الوقت لتسريع الأداء
+      max-parallel: 1
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
 
     runs-on: ubuntu-latest
