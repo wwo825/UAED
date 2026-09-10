@@ -18,9 +18,9 @@ s3 = boto3.client(
     aws_secret_access_key=CF_R2_SECRET_KEY,
     region_name="auto",
 )
-r2_prefix = "DKSA"
+r2_prefix = "Haraj"
 
-LOCAL_ROOT = f"{r2_prefix}_1"
+LOCAL_ROOT = f"{r2_prefix}"
 
 today = datetime.utcnow()
 
