@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 import boto3
 from dotenv import load_dotenv
@@ -18,18 +17,12 @@ s3 = boto3.client(
     aws_secret_access_key=CF_R2_SECRET_KEY,
     region_name="auto",
 )
+
 r2_prefix = "haraj"
+LOCAL_ROOT = r2_prefix
 
-LOCAL_ROOT = f"{r2_prefix}"
-
-today = datetime.utcnow()
-
-YEAR = today.strftime("%Y")
-MONTH = today.strftime("%m")
-DAY = today.strftime("%d")
 PREFIXES = [
-    f"{r2_prefix}/year={YEAR}/month={MONTH}/day={DAY}/",
-    f"{r2_prefix}/monitor/",
+    f"{r2_prefix}/",
 ]
 
 MONITOR_STATUS_FILE = f"{r2_prefix}/monitor/monitor_stats.yml"
@@ -48,10 +41,12 @@ def list_all_objects(prefix):
 
 
 def download_file(key):
+    # Skip images
     if "/images/" in key:
         return False
 
     local_path = os.path.join(LOCAL_ROOT, key)
+
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
     print(f"⬇ {key}")
@@ -65,43 +60,21 @@ def download_file(key):
     return True
 
 
-def download_monitor_stats():
-    local_path = os.path.join(LOCAL_ROOT, MONITOR_STATUS_FILE)
-    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-
-    print(f"⬇ {MONITOR_STATUS_FILE}")
-
-    s3.download_file(
-        BUCKET_NAME,
-        MONITOR_STATUS_FILE,
-        local_path,
-    )
-
-def download_monitor_config():
-    local_path = os.path.join(LOCAL_ROOT, MONITOR_CONFIG_FILE)
-    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-
-    print(f"⬇ {MONITOR_CONFIG_FILE}")
-
-    s3.download_file(
-        BUCKET_NAME,
-        MONITOR_CONFIG_FILE,
-        local_path,
-    )
-
-
 def main():
     downloaded = 0
     skipped = 0
+    failed = 0
 
     for prefix in PREFIXES:
         print(f"\nSearching under: {prefix}")
 
         for key in list_all_objects(prefix):
 
+            # Skip folder keys
             if key.endswith("/"):
                 continue
 
+            # Skip images
             if "/images/" in key:
                 skipped += 1
                 continue
@@ -109,30 +82,16 @@ def main():
             try:
                 if download_file(key):
                     downloaded += 1
+
             except Exception as e:
+                failed += 1
                 print(f"❌ {key}")
                 print(e)
-
-    # Download monitor_status.yml
-    try:
-        download_monitor_stats()
-        downloaded += 1
-    except Exception as e:
-        print(f"❌ {MONITOR_STATUS_FILE}")
-        print(e)
-
-    # Download websites-config.yml
-        try:
-            download_monitor_config()
-            downloaded += 1
-        except Exception as e:
-            print(f"❌ {MONITOR_CONFIG_FILE}")
-            print(e)
-
 
     print("\n==============================")
     print(f"Downloaded : {downloaded}")
     print(f"Skipped    : {skipped} (images)")
+    print(f"Failed     : {failed}")
     print("==============================")
 
 
