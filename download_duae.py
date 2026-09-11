@@ -18,7 +18,7 @@ s3 = boto3.client(
     region_name="auto",
 )
 
-r2_prefix = "haraj"
+r2_prefix = "qatarsale"
 LOCAL_ROOT = r2_prefix
 
 PREFIXES = [
