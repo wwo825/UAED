@@ -65,6 +65,21 @@ def yesterday_prefix(date_str: str | None = None) -> tuple[str, str]:
     return target.isoformat(), prefix
 
 
+def users_key_for_date(target_date, category: str) -> str:
+    """Build the users-data.xlsx cache key for a given date + category
+    (rolling cache: each day's cache carries forward the previous day's file
+    plus that day's newly-found phones). Kept separate per category
+    (classified vs community) since they're enriched by independent
+    workflows/groups that may run at overlapping times."""
+    day_prefix = f"{MOTORS_PREFIX}/year={target_date.year}/month={target_date.month:02d}/day={target_date.day:02d}/"
+    if category == "classified":
+        return f"{day_prefix}classified/users-data/users-data.xlsx"
+    elif category == "community":
+        return f"{day_prefix}community/users-data/users-data.xlsx"
+    else:
+        return f"{day_prefix}users-data/users-data.xlsx"
+
+
 def list_keys(client, prefix: str) -> list[str]:
     keys = []
     paginator = client.get_paginator("list_objects_v2")
@@ -226,15 +241,15 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all", categorie
     print(f"[PREPARE] Category: {category}")
     print(f"[PREPARE] Found {len(keys)} Excel file(s).")
 
-    if category == "classified":
-        users_key = f"{classifieds_prefix}users-data/users-data.xlsx"
-    elif category == "community":
-        users_key = f"{community_prefix}users-data/users-data.xlsx"
-    else:
-        users_key = f"{prefix}users-data/users-data.xlsx"
+    target_date = datetime.strptime(date_iso, "%Y-%m-%d").date()
+    prev_date = target_date - timedelta(days=1)
 
-    cached_users = read_cached_users(client, users_key)
-    print(f"[PREPARE] Users cache: {users_key}")
+    users_key_read = users_key_for_date(prev_date, category)   # rolling cache from the day before
+    users_key_write = users_key_for_date(target_date, category)  # where today's merged cache gets saved
+
+    cached_users = read_cached_users(client, users_key_read)
+    print(f"[PREPARE] Reading cache from: {users_key_read}")
+    print(f"[PREPARE] Will write merged cache to: {users_key_write}")
     print(f"[PREPARE] Cached users with phone: {len(cached_users)}")
 
     work = []
@@ -262,7 +277,12 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all", categorie
                 need_phone = phone_missing and not cached
                 need_description = description_missing
 
-                if not need_phone and not need_description:
+                # NOTE: gate inclusion on the raw "field is empty" status
+                # (phone_missing/description_missing), NOT on need_phone --
+                # a row whose phone is missing but already satisfied by the
+                # cache (need_phone=False) must still be included so its own
+                # file gets the cached phone written in via combine().
+                if not phone_missing and not description_missing:
                     continue
 
                 work.append({
@@ -292,7 +312,8 @@ def prepare(date_str: str | None, out_dir: str, category: str = "all", categorie
             "prefix": prefix,
             "category": category,
             "category_slugs": category_slugs,
-            "users_key": users_key,
+            "users_key_read": users_key_read,
+            "users_key_write": users_key_write,
             "jobs": manifest,
             "total_work_items": len(work),
             "total_jobs": len(chunks),
@@ -698,9 +719,11 @@ def combine(results_dir: str, date_str: str | None):
             changed_files += 1
             print(f"[COMBINE] Uploaded: {key}")
 
-    # Merge users-data with the existing cache. Only successful phone records are appended.
-    users_key = manifest["users_key"]
-    old_users = read_cached_users(client, users_key)
+    # Merge users-data with the rolling cache: read yesterday's cache, add any
+    # newly-found phones from this run, and save the result as TODAY's cache.
+    users_key_read = manifest["users_key_read"]
+    users_key_write = manifest["users_key_write"]
+    old_users = read_cached_users(client, users_key_read)
 
     merged = {}
     for uid, row in old_users.items():
@@ -723,11 +746,11 @@ def combine(results_dir: str, date_str: str | None):
 
         upload_bytes(
             client,
-            users_key,
+            users_key_write,
             build_excel_bytes({"users": users_df}),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        print(f"[COMBINE] users-data: {len(users_df)} users")
+        print(f"[COMBINE] users-data: {len(users_df)} users -> saved to {users_key_write}")
 
     summary = {
         "date": date_iso,
