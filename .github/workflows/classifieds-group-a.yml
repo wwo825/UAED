@@ -19,7 +19,7 @@ env:
   PYTHON_VERSION: "3.12"
   BATCH_SIZE: "15"
   GROUP_NAME: "classified-a"
-  CATEGORIES: "electronics,computers-networking,gaming,mobile-phones-pdas,cameras-imaging"
+  CATEGORIES: "electronics,computers-networking,gaming,cameras-imaging"
 
 jobs:
   prepare:
