@@ -18,8 +18,8 @@ s3 = boto3.client(
     region_name="auto",
 )
 
-r2_prefix = "DUAE/year=2026/month=09/day=20/property"
-LOCAL_ROOT = r2_prefix
+r2_prefix = "DUAE/year=2026/month=08/day=25/property"
+LOCAL_ROOT = "DUAE"
 
 PREFIXES = [
     f"{r2_prefix}/",
