@@ -19,7 +19,7 @@ env:
   PYTHON_VERSION: "3.12"
   BATCH_SIZE: "15"
   GROUP_NAME: "classified-b"
-  CATEGORIES: "mobile-phones-pdas,clothing-accessories,business-industrial,home-appliances"
+  CATEGORIES: "mobile-phones-pdas,clothing-accessories"
 
 jobs:
   prepare:
